@@ -42,24 +42,34 @@ tolerance. The exported 629 poses matched the existing batch trajectory
 exactly: timestamps, positions, and rotations had zero difference at the
 reported numeric precision.
 
-For this one run, the median LiDAR period was **0.1000 s**. Measured Python
-processing time per scan was mean **0.8382 s**, p50 **0.2708 s**, p95 **3.8913
-s**, and max **11.8663 s**. A single-worker schedule simulation based on those
-service times reported **626 of 628 inter-scan deadlines missed**, output
-latency p50 **179.01 s** and p95 **440.73 s**. This is a strong indication that
-the current implementation cannot keep up at this recorded rate under this
-run's conditions.
+An initial replay profile found that local KD-tree queries and plane fits
+accounted for much of scan-processing time. The implementation now batches the
+queries and plane fits for each EKF residual evaluation. A follow-up full-bag
+run processed all 629 scans with median LiDAR period **0.1000 s**. Per-scan
+processing was mean **0.1405 s**, p50 **0.0580 s**, p95 **0.5267 s**, and max
+**2.5125 s**. The single-worker timestamp schedule missed **599 of 628
+inter-scan deadlines**; simulated output latency was p50 **24.30 s** and p95
+**27.29 s**. Every scan still had a radar frame within 0.06 s.
 
-This is still an offline bag read and timestamp-based schedule simulation, not
-a live sensor test. It does not measure actual ROS queue growth or latency on a
-target robot. The results are from one run on the development computer and
-need to be repeated under controlled, documented hardware/load conditions.
+The optimization preserved the full trajectory exactly: all 629 timestamps,
+positions, and rotations match the saved batch trajectory. The average service
+time is lower than the 0.1 s scan period, but the long tail means this run
+still does not establish reliable 10 Hz operation.
 
-An earlier full-sequence run averaged **0.168 seconds per corrected scan**;
-that is the value currently used as an illustrative input in the MATLAB pose
-replay. Do not treat the earlier average as a reliable deployment benchmark or
-combine it with the newer run's latency simulation. See `matlab/README.md` for
-the playback limitation.
+The separate initial replay measured a 0.8382 s mean, so the observed full-run
+mean fell by about **83%** after batching; these two full-run measurements were
+not collected under a controlled benchmark setup.
+
+As a focused profile check, the same 15 scans (26–40) took 6.305 s total in
+`PipelineProcessor.process_scan` before batching and 1.037 s afterward under
+the profiler. This supports the optimization result, though the full replay
+still needs repeated runs under controlled load.
+
+This is an offline bag read and timestamp-based schedule simulation, not a live
+sensor test. It does not measure actual ROS queue growth or target-hardware
+latency. Repeat under controlled, documented hardware/load conditions before
+making a deployment claim. See `matlab/README.md` for the saved-pose playback
+limitation.
 
 ## Work needed before claiming real-time deployment
 

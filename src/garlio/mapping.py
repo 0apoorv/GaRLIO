@@ -41,9 +41,31 @@ class LocalPlaneMap:
         self.planarity_thresh = planarity_thresh
 
     def query(self, point_world: np.ndarray) -> PlaneFit | None:
-        dists, idx = self.tree.query(point_world, k=self.k_neighbors)
-        neighbors = self.map_points[idx]
-        fit = fit_local_plane(neighbors, self.planarity_thresh)
-        if not fit.is_planar:
-            return None
-        return fit
+        return self.query_many(np.asarray(point_world, dtype=float).reshape(1, 3))[0]
+
+    def query_many(self, points_world: np.ndarray) -> list[PlaneFit | None]:
+        """Query and fit local planes for many points in batched NumPy calls."""
+        points_world = np.asarray(points_world, dtype=float).reshape(-1, 3)
+        if len(points_world) == 0:
+            return []
+
+        _, indices = self.tree.query(points_world, k=self.k_neighbors)
+        neighbors = self.map_points[np.asarray(indices)]
+        centroids = neighbors.mean(axis=1)
+        centered = neighbors - centroids[:, None, :]
+        covariances = np.einsum("nki,nkj->nij", centered, centered) / self.k_neighbors
+        eigenvalues, eigenvectors = np.linalg.eigh(covariances)
+        ratios = np.full(len(points_world), np.inf)
+        valid = eigenvalues[:, 1] >= 1e-12
+        ratios[valid] = eigenvalues[valid, 0] / eigenvalues[valid, 1]
+        planar = ratios < self.planarity_thresh
+
+        return [
+            PlaneFit(
+                normal=eigenvectors[i, :, 0],
+                centroid=centroids[i],
+                is_planar=bool(planar[i]),
+                planarity_ratio=float(ratios[i]),
+            ) if planar[i] else None
+            for i in range(len(points_world))
+        ]

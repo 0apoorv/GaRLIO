@@ -66,9 +66,10 @@ connect to live sensors or sleep at the recorded playback rate. Outputs are
 `stream_replay_timing.csv`, `stream_replay_trajectory.npz`, and
 `stream_replay_timing.png`.
 On the local full-sequence run, all 629 poses matched the existing batch
-trajectory exactly. The timing simulation missed 626 of 628 inter-scan
-deadlines; see [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md) for the
-measured latency details and limits.
+trajectory exactly. After batching the local plane queries, processing averaged
+0.1405 s per scan (p95 0.5267 s) and the timestamp schedule missed 599 of 628
+inter-scan deadlines. See [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md)
+for the full timing details and limits.
 
 ## 7. Run the radar/gravity ablation and evo cross-check
 ```sh
@@ -105,11 +106,12 @@ MATLAB command window, run:
 ```matlab
 addpath('matlab');
 report = run_realtime_replay( ...
-    'outputs/full_sequence/trajectory_evaluation.mat', 0.168, 1.0);
+    'outputs/full_sequence/trajectory_evaluation.mat', 0.1405, 1.0);
 ```
 This animates saved corrected poses using their recorded timestamps. `1.0`
-plays at the recorded rate; `2.0` is twice as fast. The `0.168` seconds per
-scan is an assumed processing-time input from one offline Python run. MATLAB
+plays at the recorded rate; `2.0` is twice as fast. The `0.1405` seconds per
+scan is an assumed processing-time input from one optimized offline Python
+replay. MATLAB
 does not execute the estimator here. Deadline misses and queue wait are
 calculated from the assumption, not measured in MATLAB. See
 [matlab/README.md](matlab/README.md) before presenting these results.

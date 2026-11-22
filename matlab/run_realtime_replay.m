@@ -6,10 +6,10 @@ function report = run_realtime_replay(matPath, processingTimeS, playbackSpeed)
 % From the repository root in MATLAB:
 %   addpath('matlab');
 %   report = run_realtime_replay( ...
-%       'outputs/full_sequence/trajectory_evaluation.mat', 0.168, 1.0);
+%       'outputs/full_sequence/trajectory_evaluation.mat', 0.1405, 1.0);
 %
-% processingTimeS is an assumed service time per scan. The default 0.168 s
-% came from one offline Python full-sequence run on this computer. It is an
+% processingTimeS is an assumed service time per scan. The default 0.1405 s
+% is the mean from one optimized offline Python bag replay on this computer. It is an
 % illustrative input, not MATLAB processing time or a target-device result.
 % playbackSpeed=1 plays at recorded timestamps; 2 plays twice as fast.
 
@@ -19,7 +19,7 @@ if nargin < 1 || isempty(matPath)
         'trajectory_evaluation.mat');
 end
 if nargin < 2 || isempty(processingTimeS)
-    processingTimeS = 0.168;
+    processingTimeS = 0.1405;
 end
 if nargin < 3 || isempty(playbackSpeed)
     playbackSpeed = 1.0;

@@ -79,8 +79,8 @@ not MATLAB validation.
 This paces the **saved corrected poses** at their recorded scan timestamps and
 animates the path. It also models a serial per-scan processing budget. It does
 not run the GaRLIO estimator in MATLAB or read live sensors. The default service
-time (0.168 s/scan) is from one offline Python run on this computer; it is not
-MATLAB timing or a target-hardware result.
+time (0.1405 s/scan) is the mean from one optimized offline Python bag replay
+on this computer; it is not MATLAB timing or a target-hardware result.
 
 In MATLAB Online, upload the `matlab/` folder and
 `outputs/full_sequence/trajectory_evaluation.mat` to MATLAB Drive. In MATLAB,
@@ -88,13 +88,13 @@ run:
 ```matlab
 addpath('matlab');
 report = run_realtime_replay( ...
-    'outputs/full_sequence/trajectory_evaluation.mat', 0.168, 1.0);
+    'outputs/full_sequence/trajectory_evaluation.mat', 0.1405, 1.0);
 ```
 The same command works in desktop MATLAB from the repository root. Playback
 speed `1.0` follows the recorded timing; `2.0` plays twice as fast. The
 processing time is an input assumption. The reported queue wait and missed
 deadlines are simulated from that assumption, not measured estimator runtime.
-Change `0.168` to examine a hypothetical processing budget (for example,
+Change `0.1405` to examine a hypothetical processing budget (for example,
 `0.05` s/scan).
 
 For true real-time estimator testing, first port the estimator or connect MATLAB

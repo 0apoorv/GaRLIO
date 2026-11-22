@@ -124,6 +124,9 @@ class PipelineProcessor:
             n_query = min(QUERY_SUBSAMPLE, len(current_frame))
             query_idx = self.rng.choice(len(current_frame), n_query, replace=False)
             query_points = current_frame[query_idx]
+            query_points_imu = (
+                T_X36D_XT32[:3, :3] @ query_points.T
+            ).T + T_X36D_XT32[:3, 3]
             radar_result = None
             radar_pts = np.zeros((0, 3))
             doppler = np.zeros(0)
@@ -139,10 +142,9 @@ class PipelineProcessor:
 
             def residual_fn(s):
                 entries = []
-                for p in query_points:
-                    p_imu = T_X36D_XT32[:3, :3] @ p + T_X36D_XT32[:3, 3]
-                    p_world = s.R @ p_imu + s.p
-                    fit = self.prev_map.query(p_world)
+                query_world = (s.R @ query_points_imu.T).T + s.p
+                plane_fits = self.prev_map.query_many(query_world)
+                for p, fit in zip(query_points, plane_fits):
                     if fit is not None:
                         r, H = point_to_plane_residual(s, p, fit.normal, fit.centroid, T_X36D_XT32)
                         entries.append((r, H, 0.05))
