@@ -78,6 +78,35 @@ the MAT file. Report a run as MATLAB or Octave validation according to the
 application actually used. See [matlab/README.md](matlab/README.md) for each
 MATLAB file's role and input conventions.
 
+## 8. Replay recorded poses in MATLAB (real-time-style demonstration)
+In MATLAB Online, upload the `matlab/` folder and
+`outputs/full_sequence/trajectory_evaluation.mat` to MATLAB Drive. In the
+MATLAB command window, run:
+```matlab
+addpath('matlab');
+report = run_realtime_replay( ...
+    'outputs/full_sequence/trajectory_evaluation.mat', 0.168, 1.0);
+```
+This animates saved corrected poses using their recorded timestamps. `1.0`
+plays at the recorded rate; `2.0` is twice as fast. The `0.168` seconds per
+scan is an assumed processing-time input from one offline Python run. MATLAB
+does not execute the estimator here. Deadline misses and queue wait are
+calculated from the assumption, not measured in MATLAB. See
+[matlab/README.md](matlab/README.md) before presenting these results.
+
+## Remaining real-time validation
+- Replay another complete sequence and confirm the result is consistent.
+- Diagnose why radar Doppler improves translation but slightly increases
+  rotation error; verify timestamps, sensor calibration, and frame conventions.
+- Evaluate adaptive/fixed covariance changes and compare them against the
+  current filter; do not claim false confidence until reported covariance has
+  been compared with actual error.
+- Port the estimator or connect MATLAB to live Python/ROS before claiming a
+  MATLAB real-time estimator test.
+- On target hardware, measure per-scan runtime distribution, deadline misses,
+  queue growth, dropped/late messages, synchronization, and sensor-loss
+  behavior.
+
 ## Main files
 - `scripts/extract_snail_radar.py`: extracts IMU, radar and LiDAR messages from
   a ROS bag.
@@ -92,7 +121,8 @@ MATLAB file's role and input conventions.
   ATE and relative-error calculations.
 - `src/garlio/snail_radar_extrinsics.py`: dataset sensor extrinsics and pose
   conversion into the XT32 evaluation frame.
-- `matlab/`: MATLAB-compatible ATE/RTE/RRE and Python parity scripts.
+- `matlab/`: MATLAB-compatible ATE/RTE/RRE, Python parity, and saved-trajectory
+  real-time-style replay scripts.
 
 Generated outputs and the dataset are intentionally kept out of Git; rerun the
 commands above to reproduce them locally.
