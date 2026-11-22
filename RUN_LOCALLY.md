@@ -95,6 +95,9 @@ calculated from the assumption, not measured in MATLAB. See
 [matlab/README.md](matlab/README.md) before presenting these results.
 
 ## Remaining real-time validation
+- See [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md) for the code-based
+  deployment assessment, limitations, and concrete checks needed before making
+  a live real-time claim.
 - Replay another complete sequence and confirm the result is consistent.
 - Diagnose why radar Doppler improves translation but slightly increases
   rotation error; verify timestamps, sensor calibration, and frame conventions.
