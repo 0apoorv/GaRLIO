@@ -9,8 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from garlio.eskf import ESKF, ImuNoiseParams, N_ERR
 from garlio.state import ImuState
 from garlio.mapping import LocalPlaneMap
-from garlio.radar import estimate_ego_velocity_ransac
-from garlio.update import point_to_plane_residual, radar_doppler_residual, stack_residuals, iterated_ekf_update
+from garlio.radar import estimate_ego_velocity_ransac, modified_z_scores
+from garlio.update import (
+    point_to_plane_residual, radar_doppler_residual, gravity_direction_residual,
+    stack_residuals, iterated_ekf_update,
+)
+from garlio.snail_radar_extrinsics import T_X36D_XT32, T_X36D_OCULII
 
 GRAVITY = np.array([0.0, 0.0, -9.81])
 MAP_SUBSAMPLE = 5000
@@ -30,6 +34,8 @@ def propagate_imu_segment(eskf, state, P, imu, t_start, t_end):
     mask = (imu[:, 0] > t_start) & (imu[:, 0] <= t_end)
     segment = imu[mask]
     prev_t = t_start
+    R_start = state.R.copy()
+    delta_v_body = np.zeros(3)
     for row in segment:
         t = row[0]
         dt = t - prev_t
@@ -38,13 +44,15 @@ def propagate_imu_segment(eskf, state, P, imu, t_start, t_end):
             continue
         accel_meas = row[1:4]
         gyro_meas = row[4:7]
+        delta_v_body += R_start.T @ state.R @ (accel_meas - state.ba) * dt
         state, P = eskf.propagate(state, P, gyro_meas, accel_meas, dt)
         prev_t = t
-    return state, P
+    return state, P, delta_v_body
 
 
-def transform_to_world(points, state):
-    return (state.R @ points.T).T + state.p
+def transform_to_world(points, state, T_imu_sensor):
+    points_imu = (T_imu_sensor[:3, :3] @ points.T).T + T_imu_sensor[:3, 3]
+    return (state.R @ points_imu.T).T + state.p
 
 
 def find_nearest_radar_frame(radar_times, radar_frames, t_query):
@@ -52,7 +60,17 @@ def find_nearest_radar_frame(radar_times, radar_frames, t_query):
     return radar_frames[idx]
 
 
-def run_pipeline(imu, radar, lidar, use_corrections: bool, rng_seed: int = 0):
+def angular_velocity_at(imu, t_query):
+    """Return the most recent raw gyro sample at or before ``t_query``."""
+    index = int(np.searchsorted(imu[:, 0], t_query, side="right") - 1)
+    return imu[max(index, 0), 4:7]
+
+
+def run_pipeline(
+    imu, radar, lidar, use_corrections: bool, rng_seed: int = 0,
+    return_rotations: bool = False, use_gravity_update: bool = True,
+    use_radar_update: bool = True,
+):
     rng = np.random.default_rng(rng_seed)
     noise = ImuNoiseParams(gyro_noise=1e-3, accel_noise=1e-2, gyro_bias_rw=1e-5, accel_bias_rw=1e-4)
     eskf = ESKF(gravity=GRAVITY, noise=noise)
@@ -66,22 +84,24 @@ def run_pipeline(imu, radar, lidar, use_corrections: bool, rng_seed: int = 0):
     P = np.eye(N_ERR) * 1e-6
 
     t0 = lidar_times[0]
-    state, P = propagate_imu_segment(eskf, state, P, imu, imu[0, 0], t0)
+    state, P, _ = propagate_imu_segment(eskf, state, P, imu, imu[0, 0], t0)
 
     positions = [state.p.copy()]
+    rotations = [state.R.copy()]
     prev_map = None
     prev_t = t0
 
     for i in range(1, len(lidar_times)):
         t = lidar_times[i]
-        state, P = propagate_imu_segment(eskf, state, P, imu, prev_t, t)
+        previous_state = state.copy()
+        state, P, delta_v_body = propagate_imu_segment(eskf, state, P, imu, prev_t, t)
 
         current_frame = lidar_frames[i]
         if len(current_frame) > MAP_SUBSAMPLE:
             map_idx = rng.choice(len(current_frame), MAP_SUBSAMPLE, replace=False)
         else:
             map_idx = np.arange(len(current_frame))
-        world_map_points = transform_to_world(current_frame[map_idx], state)
+        world_map_points = transform_to_world(current_frame[map_idx], state, T_X36D_XT32)
 
         if use_corrections and prev_map is not None:
             n_query = min(QUERY_SUBSAMPLE, len(current_frame))
@@ -103,20 +123,41 @@ def run_pipeline(imu, radar, lidar, use_corrections: bool, rng_seed: int = 0):
             def residual_fn(s):
                 entries = []
                 for p in query_points:
-                    p_world = s.R @ p + s.p
+                    p_imu = T_X36D_XT32[:3, :3] @ p + T_X36D_XT32[:3, 3]
+                    p_world = s.R @ p_imu + s.p
                     fit = prev_map.query(p_world)
                     if fit is not None:
-                        r, H = point_to_plane_residual(s, p, fit.normal, fit.centroid)
+                        r, H = point_to_plane_residual(
+                            s, p, fit.normal, fit.centroid, T_X36D_XT32
+                        )
                         entries.append((r, H, 0.05))
-                if radar_result is not None:
+                if radar_result is not None and use_radar_update:
                     static_pts = radar_pts[radar_result.static_mask]
                     static_doppler = doppler[radar_result.static_mask]
-                    n_use = min(50, len(static_pts))
+                    static_unit = static_pts / np.maximum(
+                        np.linalg.norm(static_pts, axis=1, keepdims=True), 1e-9
+                    )
+                    static_residuals = np.abs(
+                        -static_unit @ radar_result.v_ego - static_doppler
+                    )
+                    relative_R = state.R @ previous_state.R.T
+                    turn_angle = np.arccos(np.clip((np.trace(relative_R) - 1.0) / 2.0, -1.0, 1.0))
+                    quality_residuals = static_residuals * np.exp(min(10.0 * turn_angle, 50.0))
+                    static_scores = modified_z_scores(quality_residuals)
+                    ranked_idx = np.argsort(quality_residuals)
+                    n_use = min(50, max(1, len(static_pts) // 3))
                     if n_use > 0:
-                        use_idx = rng.choice(len(static_pts), n_use, replace=False)
+                        use_idx = ranked_idx[:n_use]
                         for j in use_idx:
-                            r, H = radar_doppler_residual(s, static_pts[j], static_doppler[j])
-                            entries.append((r, H, 0.1))
+                            r, H = radar_doppler_residual(
+                                s, static_pts[j], static_doppler[j], T_X36D_OCULII,
+                                angular_velocity_at(imu, t),
+                            )
+                            # Preserve a positive variance and downweight points
+                            # whose Doppler residual is a robust outlier.
+                            excess = max(0.0, abs(static_scores[j]) - 3.5)
+                            variance = 0.1 * (1.0 + excess / 5.0)
+                            entries.append((r, H, variance))
                 if not entries:
                     return np.zeros(0), np.zeros((0, N_ERR)), np.zeros(0)
                 return stack_residuals(entries)
@@ -125,10 +166,36 @@ def run_pipeline(imu, radar, lidar, use_corrections: bool, rng_seed: int = 0):
             if len(r0) >= 6:
                 state, P = iterated_ekf_update(state, P, residual_fn, n_iters=3)
 
+            if use_gravity_update:
+                # Second-stage, velocity-aware gravity update. Radar/LiDAR have
+                # already corrected state.v; compare that velocity change with the
+                # IMU specific-force preintegration over this scan interval.
+                try:
+                    def gravity_fn(s):
+                        r_g, H_g, _ = gravity_direction_residual(
+                            s, previous_state, delta_v_body, GRAVITY, t - prev_t
+                        )
+                        return np.array([r_g]), H_g.reshape(1, -1), np.array([0.01])
+
+                    gravity_est = gravity_direction_residual(
+                        state, previous_state, delta_v_body, GRAVITY, t - prev_t
+                    )[2]
+                    gravity_angle = np.arccos(np.clip(
+                        (GRAVITY / np.linalg.norm(GRAVITY)) @
+                        (gravity_est / np.linalg.norm(gravity_est)), -1.0, 1.0
+                    ))
+                    if gravity_angle < 0.15:
+                        state, P = iterated_ekf_update(state, P, gravity_fn, n_iters=1)
+                except ValueError:
+                    pass
+
         prev_map = LocalPlaneMap(world_map_points, k_neighbors=K_NEIGHBORS, planarity_thresh=PLANARITY_THRESH)
         prev_t = t
         positions.append(state.p.copy())
+        rotations.append(state.R.copy())
 
+    if return_rotations:
+        return np.array(positions), np.array(rotations), lidar_times
     return np.array(positions), lidar_times
 
 

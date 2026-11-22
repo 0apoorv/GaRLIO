@@ -8,6 +8,7 @@ class RadarEgoVelocityResult:
     v_ego: np.ndarray
     static_mask: np.ndarray
     dynamic_mask: np.ndarray
+    modified_z: np.ndarray | None = None
 
 
 def _unit_vectors(points: np.ndarray) -> np.ndarray:
@@ -62,7 +63,8 @@ def estimate_ego_velocity_ransac(
         residuals = np.abs(A_full @ v_ego - doppler)
         static_mask = residuals < inlier_thresh
         return RadarEgoVelocityResult(
-            v_ego=v_ego, static_mask=static_mask, dynamic_mask=~static_mask
+            v_ego=v_ego, static_mask=static_mask, dynamic_mask=~static_mask,
+            modified_z=modified_z_scores(residuals),
         )
 
     A_inliers = A_full[best_inlier_mask]
@@ -74,5 +76,18 @@ def estimate_ego_velocity_ransac(
     dynamic_mask = ~static_mask
 
     return RadarEgoVelocityResult(
-        v_ego=v_ego, static_mask=static_mask, dynamic_mask=dynamic_mask
+        v_ego=v_ego, static_mask=static_mask, dynamic_mask=dynamic_mask,
+        modified_z=modified_z_scores(residuals),
     )
+
+
+def modified_z_scores(residuals: np.ndarray) -> np.ndarray:
+    """Robust modified-z scores for scalar residuals, using median and MAD."""
+    residuals = np.asarray(residuals, dtype=float).reshape(-1)
+    if residuals.size == 0:
+        return np.zeros(0, dtype=float)
+    median = np.median(residuals)
+    mad = np.median(np.abs(residuals - median))
+    if mad <= np.finfo(float).eps:
+        return np.zeros_like(residuals)
+    return 0.6745 * (residuals - median) / mad
