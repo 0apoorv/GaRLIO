@@ -50,7 +50,27 @@ XT32 LiDAR frame, timestamp-matches ground truth, computes ATE/APE and 1-second
 RTE/RRE, and writes plots plus `trajectory_evaluation.mat` under the output
 directory.
 
-## 6. Run the radar/gravity ablation and evo cross-check
+## 6. Replay a ROS bag through the incremental Python pipeline
+The replay reads IMU, radar, and LiDAR messages from the bag in timestamp
+order, processes each LiDAR scan through the same incremental estimator used by
+the batch runner, and writes per-scan timing and pose outputs:
+```sh
+PYTHONPATH=src:scripts python scripts/replay_rosbag_realtime.py \
+  /path/to/data1.bag --output-dir outputs/stream_replay
+```
+By default, radar must be within 0.06 seconds of the LiDAR timestamp; override
+with `--max-radar-dt` if the dataset's timing requires a different policy. The
+script reports measured scan service times and a single-worker deadline/queue
+simulation based on recorded timestamps. It reads the bag offline; it does not
+connect to live sensors or sleep at the recorded playback rate. Outputs are
+`stream_replay_timing.csv`, `stream_replay_trajectory.npz`, and
+`stream_replay_timing.png`.
+On the local full-sequence run, all 629 poses matched the existing batch
+trajectory exactly. The timing simulation missed 626 of 628 inter-scan
+deadlines; see [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md) for the
+measured latency details and limits.
+
+## 7. Run the radar/gravity ablation and evo cross-check
 ```sh
 PYTHONPATH=src python scripts/evaluate_gravity_update_ablation.py \
   --data-root /path/to/dataset-root \
@@ -62,7 +82,7 @@ The ablation writes a CSV and MAT file for the four radar-Doppler/gravity
 update combinations. `evo` is an independent cross-check for APE/ATE and
 frame-based RPE; our fixed-time 1-second RTE/RRE are reported separately.
 
-## 7. Recompute metrics in MATLAB or Octave
+## 8. Recompute metrics in MATLAB or Octave
 The MAT export is the hand-off between Python and MATLAB. In MATLAB, from the
 repository root:
 ```matlab
@@ -78,7 +98,7 @@ the MAT file. Report a run as MATLAB or Octave validation according to the
 application actually used. See [matlab/README.md](matlab/README.md) for each
 MATLAB file's role and input conventions.
 
-## 8. Replay recorded poses in MATLAB (real-time-style demonstration)
+## 9. Replay recorded poses in MATLAB (real-time-style demonstration)
 In MATLAB Online, upload the `matlab/` folder and
 `outputs/full_sequence/trajectory_evaluation.mat` to MATLAB Drive. In the
 MATLAB command window, run:

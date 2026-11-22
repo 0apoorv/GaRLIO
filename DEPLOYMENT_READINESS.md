@@ -33,16 +33,33 @@ that it meets live sensor deadlines on our target hardware.
   current real-data runner, so our Python pipeline should not be described as a
   complete reproduction of the paper.
 
-## Timing evidence so far
+## First Python bag-replay milestone
 
-One recorded full-sequence Python run took about **0.168 seconds per corrected
-LiDAR scan on the computer used for that run**. The MATLAB replay uses this as
-an assumed service time. At a 10 Hz LiDAR rate, scans arrive every 0.1 seconds,
-so a serial processor at that measured average would miss the nominal cadence
-and accumulate work. This is an indicative result from one offline run, not a
-target-hardware benchmark: it has no per-scan latency distribution, worst-case
-latency, queue measurements, or live sensor I/O. See `matlab/README.md` for the
-replay limitation.
+The incremental processor was run against the local Snail-Radar `data1.bag`.
+It consumed 28,645 IMU messages, 944 radar frames, and 629 LiDAR scans in bag
+timestamp order. No scan lacked radar within the configured 0.06-second
+tolerance. The exported 629 poses matched the existing batch trajectory
+exactly: timestamps, positions, and rotations had zero difference at the
+reported numeric precision.
+
+For this one run, the median LiDAR period was **0.1000 s**. Measured Python
+processing time per scan was mean **0.8382 s**, p50 **0.2708 s**, p95 **3.8913
+s**, and max **11.8663 s**. A single-worker schedule simulation based on those
+service times reported **626 of 628 inter-scan deadlines missed**, output
+latency p50 **179.01 s** and p95 **440.73 s**. This is a strong indication that
+the current implementation cannot keep up at this recorded rate under this
+run's conditions.
+
+This is still an offline bag read and timestamp-based schedule simulation, not
+a live sensor test. It does not measure actual ROS queue growth or latency on a
+target robot. The results are from one run on the development computer and
+need to be repeated under controlled, documented hardware/load conditions.
+
+An earlier full-sequence run averaged **0.168 seconds per corrected scan**;
+that is the value currently used as an illustrative input in the MATLAB pose
+replay. Do not treat the earlier average as a reliable deployment benchmark or
+combine it with the newer run's latency simulation. See `matlab/README.md` for
+the playback limitation.
 
 ## Work needed before claiming real-time deployment
 
