@@ -104,9 +104,12 @@ sensor-loss behavior on the target computer.
 
 ## 6. Generate a timestamped sensor-event stream for the Python estimator
 MATLAB Online's Python environment currently has no NumPy/SciPy, so it cannot
-run this estimator directly. Instead, MATLAB creates the event ordering and
-the local Python consumer runs the estimator on that ordered stream. This is
-an offline replay/scheduling simulation, not a live MATLAB-to-Python connection.
+run this estimator directly. MATLAB creates a timestamp-ordered event manifest
+from the recorded Snail-Radar sensor messages. The companion source MAT holds
+the raw IMU values and radar/LiDAR frames. A local Python producer then emits
+those events at their recorded wall-clock rate, while a separate consumer runs
+the existing GaRLIO pipeline. This is a file-based real-time replay simulation,
+not a direct live MATLAB-to-Python connection or a live sensor test.
 
 First, on the Mac Terminal from the repository root, export the first 15
 seconds of raw sensors (about 100 MB):
@@ -132,8 +135,7 @@ generate_sensor_event_stream( ...
 ```
 
 Download `matlab_generated_event_stream.mat` from MATLAB Drive into
-`outputs/matlab_sensor_stream/`. Then run the Python consumer from the Mac
-Terminal:
+`outputs/matlab_sensor_stream/`. For the fast offline parity replay, run:
 
 ```sh
 PYTHONPATH=src:scripts python scripts/replay_matlab_sensor_event_stream.py \
@@ -142,11 +144,60 @@ PYTHONPATH=src:scripts python scripts/replay_matlab_sensor_event_stream.py \
   --output-dir outputs/matlab_sensor_stream/run
 ```
 
-It processes each LiDAR scan, simulates deadlines from recorded timestamps,
-and compares the resulting poses with the saved batch trajectory when that MAT
-file exists. Event codes are IMU=1, radar=2, LiDAR=3; simultaneous timestamps
-are ordered IMU, radar, then LiDAR. The source MAT and generated event manifest
-are separate so MATLAB only needs to save the compact event schedule.
+It processes the scans without waiting in real time and estimates deadlines
+from recorded timestamps. This is useful for quick algorithm parity checks.
+For the wall-clock-paced test requested for the MATLAB scenario, run instead:
+
+```sh
+PYTHONPATH=src:scripts python scripts/replay_matlab_sensor_event_stream_realtime.py \
+  outputs/matlab_sensor_stream/sensor_stream_source.mat \
+  outputs/matlab_sensor_stream/matlab_generated_event_stream.mat \
+  --output-dir outputs/matlab_sensor_stream/realtime_run \
+  --playback-speed 1.0
+```
+
+At `1.0x`, an independent producer thread releases events according to the
+recorded timestamps while the Python estimator processes incoming events. The
+run measures scan service time, event-queue wait, output latency, and missed
+next-scan deadlines; it also checks poses against the saved batch trajectory.
+The producer and estimator run on the Mac. MATLAB Online supplies the event
+manifest; it cannot stream directly into the Mac's local process. Event codes
+are IMU=1, radar=2, LiDAR=3; ties are ordered IMU, radar, then LiDAR. Both
+scripts use the source MAT payloads by event index.
+
+The Snail-Radar timestamps in the exported 15-second segment have median
+intervals of about 2.49 ms for IMU, 66.4 ms for radar, and 100 ms for LiDAR.
+These are measured from this sequence, not synthetic frequencies. The paper
+describes radar sweeps at a higher rate than LiDAR and radar-based LiDAR sweep
+synchronization. Our current pipeline uses the real timestamp order and a
+nearest-radar tolerance; it does not implement the paper's full sweep
+reconstruction or radar-guided LiDAR dynamic-point removal. Describe this as a
+real-time-style test of our current Python implementation, not a complete paper
+reproduction.
+
+For the complete local sequence, export through the last LiDAR scan and build
+the compact manifest without uploading the large point-cloud MAT to MATLAB
+Drive:
+
+```sh
+PYTHONPATH=src python scripts/export_sensor_stream_for_matlab.py \
+  --data-dir "/Users/apoorvsharma/Downloads/garlio_btp_full/real_data/extracted_data" \
+  --output outputs/matlab_sensor_stream/full_sequence_sensor_source.mat \
+  --max-seconds 0
+python scripts/build_matlab_compatible_event_manifest.py \
+  outputs/matlab_sensor_stream/full_sequence_sensor_source.mat \
+  outputs/matlab_sensor_stream/full_sequence_event_stream_matlab_compatible.mat
+PYTHONPATH=src:scripts python scripts/replay_matlab_sensor_event_stream_realtime.py \
+  outputs/matlab_sensor_stream/full_sequence_sensor_source.mat \
+  outputs/matlab_sensor_stream/full_sequence_event_stream_matlab_compatible.mat \
+  --output-dir outputs/matlab_sensor_stream/full_sequence_realtime_run \
+  --playback-speed 1.0
+```
+
+The local manifest builder uses the same ordering keys as the MATLAB
+`sortrows` generator. We checked all three arrays against MATLAB's downloaded
+manifest on the 15-second sample. Label the full run as MATLAB-compatible event
+ordering; only the 15-second manifest was generated in MATLAB Online.
 
 ## Files
 
@@ -158,3 +209,7 @@ are separate so MATLAB only needs to save the compact event schedule.
   assumption-based serial deadline simulation; not a MATLAB estimator.
 - `generate_sensor_event_stream.m`: MATLAB event-order generator for raw
   IMU/radar/LiDAR measurements; consumed by the Python estimator replay.
+- `scripts/replay_matlab_sensor_event_stream_realtime.py`: wall-clock-paced
+  producer/consumer replay that measures the existing Python estimator.
+- `scripts/build_matlab_compatible_event_manifest.py`: local large-sequence
+  event scheduler equivalent to the MATLAB `sortrows` ordering.

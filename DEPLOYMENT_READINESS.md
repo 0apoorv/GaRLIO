@@ -2,11 +2,12 @@
 
 ## Assessment
 
-**Our current Python implementation is an offline research prototype, not a
-live real-time estimator.** It reads complete extracted sensor arrays, processes
-LiDAR frames in a loop, and saves trajectories for evaluation. The MATLAB work
-plays back saved poses; it does not run the estimator or connect to live
-sensors.
+**Our current Python implementation is an offline research prototype with a
+wall-clock-paced recorded-data replay, not a live sensor estimator.** MATLAB
+creates an event schedule from the Snail-Radar recording; a local Python
+producer releases events at their recorded timestamps while a separate
+consumer runs the existing estimator. MATLAB Online does not connect directly
+to the local Python process, and there is no live sensor or ROS subscription.
 
 The authors' public implementation is further along as a robotics package: its
 repository contains a ROS1/C++ package, launch files, and instructions to play a
@@ -20,8 +21,9 @@ that it meets live sensor deadlines on our target hardware.
 - `scripts/extract_snail_radar.py` reads a recorded ROS bag offline and saves
   sensor streams as NumPy files.
 - `scripts/demo_real_data_pipeline.py` consumes those saved arrays and processes
-  each LiDAR frame; there is no live ROS subscriber, bounded streaming buffer,
-  or pose publisher in this runner.
+  each LiDAR frame. The MATLAB event-stream replay adds a bounded event queue
+  and buffers measurements, but there is no live ROS subscriber or pose
+  publisher.
 - The estimator selects the nearest radar frame for each LiDAR timestamp with
   no maximum allowed time difference. It scans the IMU array to select each
   propagation segment.
@@ -71,6 +73,62 @@ latency. Repeat under controlled, documented hardware/load conditions before
 making a deployment claim. See `matlab/README.md` for the saved-pose playback
 limitation.
 
+## MATLAB-scheduled wall-clock replay milestone
+
+The first 15-second Snail-Radar export contains 7,041 IMU samples, 225 radar
+frames, and 150 LiDAR scans. Their timestamp medians are approximately 2.49 ms
+(about 402 Hz), 66.4 ms (about 15.1 Hz), and 100 ms (about 10 Hz), respectively.
+These rates were calculated from this recording; the paper describes radar as
+higher frequency than LiDAR and synchronizes radar/LiDAR sweeps, but does not
+specify these exact frequencies for our exported segment.
+
+A wall-clock-paced replay released the 7,416 events over 19.53 seconds while
+the estimator processed all 150 LiDAR scans. The downloaded MATLAB event MAT
+file was checked against a local reconstruction: `eventTimes`, `eventTypes`,
+and `eventIndices` were identical element by element. Across four paced runs
+(two used the downloaded MATLAB file), playback took 20.31-21.05 s; scan
+service mean was 0.0497-0.0712 s, p95 was 0.0722-0.1616 s, and max was
+0.1046-0.4409 s. Output missed 50-91 of 149 next-scan deadlines; p95
+pose-output latency from scheduled LiDAR time was 0.1260-0.4835 s. No radar
+match was omitted at the configured 0.06 s tolerance. Timestamps, positions,
+and rotations matched the saved batch trajectory exactly in all four runs.
+The timing spread shows that performance varies substantially between runs on
+this development machine; the worst run had a backlog spike and many missed
+deadlines.
+
+This shows that the current estimator consumed a wall-clock-paced recorded
+schedule on the development Mac, with missed deadlines and variable timing. It
+is not a target-hardware or live-sensor result. The actual downloaded MATLAB
+event manifest was replayed and its arrays matched the local reconstruction,
+verifying the file handoff and event ordering.
+
+## Full-sequence wall-clock replay
+
+The complete Snail-Radar sequence was exported locally through its final
+LiDAR scan: 27,956 IMU samples, 942 radar frames, and 629 LiDAR scans across a
+67.331 s event span. The full event manifest was built locally using the same
+ascending time/type/index ordering as the MATLAB script. This ordering was
+verified element by element against the downloaded MATLAB manifest on the
+15-second sample; the full-size raw point-cloud MAT was not uploaded to MATLAB
+Drive and the full manifest itself was not generated in MATLAB Online.
+
+At 1x playback, all 629 scans were processed. The run took 88.47 s for 67.33 s
+of recorded events; service time was mean 0.1296 s, p95 0.4642 s, and max
+4.6987 s. It missed 622 of 628 next-scan deadlines, with p50/p95 output
+latencies of 20.12/24.98 s and a maximum input-event queue of 11,791. No radar
+match was omitted within 0.06 s. The resulting trajectory matched all 629
+batch timestamps; maximum position difference was 0.000138 m and maximum
+rotation-matrix element difference was 6.25e-6. This confirms trajectory
+consistency, while the queue growth and missed deadlines show that the current
+Python implementation cannot keep up with this full sequence in the measured
+scenario.
+
+This test is not a complete reproduction of GaRLIO. The paper describes
+radar/LiDAR sweep reconstruction, radar-guided dynamic-point removal, and
+motion compensation. Our runner sorts measurements and uses the nearest radar
+frame within a fixed tolerance; those paper-specific preprocessing steps are
+outside this test.
+
 ## Work needed before claiming real-time deployment
 
 1. **Close the algorithm and data-path gaps.** Compare our implementation
@@ -100,15 +158,13 @@ limitation.
 
 ## Practical conclusion
 
-For the BTP, we can demonstrate **offline evaluation and timestamp-paced pose
-replay** now. We cannot yet claim that our Python estimator is ready for live
-deployment or that MATLAB tested the estimator in real time. The next useful
-deployment study is to build and replay the authors' ROS package in its
-documented environment, compare its outputs with our Python results, and then
-measure actual scan-processing deadlines on the intended hardware. If the BTP
-scope remains MATLAB-only, present the MATLAB playback as a system-level
-simulation and clearly label its processing-time input as assumed or taken
-from one offline run.
+For the BTP, we can demonstrate **MATLAB-scheduled, wall-clock-paced playback
+through our Python estimator** and report measured development-machine timing
+and batch parity. We cannot claim direct MATLAB-to-Python streaming, live sensor
+input, complete paper reproduction, or deployment readiness. Next, repeat with
+the actual downloaded MATLAB manifest, then add a local MATLAB-to-Python
+transport or ROS interface and evaluate the paper's remaining preprocessing
+before measuring on target hardware.
 
 ## Sources
 

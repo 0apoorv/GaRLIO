@@ -120,6 +120,10 @@ calculated from the assumption, not measured in MATLAB. See
 [matlab/README.md](matlab/README.md) before presenting these results.
 
 ## Remaining real-time validation
+- Section 6 in [matlab/README.md](matlab/README.md) includes a wall-clock-paced
+  replay of the MATLAB event schedule through the existing Python estimator.
+  This measures recorded-data playback, not live ROS/sensor input or a MATLAB
+  implementation of the estimator.
 - See [DEPLOYMENT_READINESS.md](DEPLOYMENT_READINESS.md) for the code-based
   deployment assessment, limitations, and concrete checks needed before making
   a live real-time claim.
@@ -129,8 +133,8 @@ calculated from the assumption, not measured in MATLAB. See
 - Evaluate adaptive/fixed covariance changes and compare them against the
   current filter; do not claim false confidence until reported covariance has
   been compared with actual error.
-- Port the estimator or connect MATLAB to live Python/ROS before claiming a
-  MATLAB real-time estimator test.
+- Connect MATLAB to live Python/ROS or run a local MATLAB sender before
+  claiming direct MATLAB-to-estimator streaming.
 - On target hardware, measure per-scan runtime distribution, deadline misses,
   queue growth, dropped/late messages, synchronization, and sensor-loss
   behavior.
