@@ -83,6 +83,9 @@ The ablation writes a CSV and MAT file for the four radar-Doppler/gravity
 update combinations. `evo` is an independent cross-check for APE/ATE and
 frame-based RPE; our fixed-time 1-second RTE/RRE are reported separately.
 
+For the MATLAB-generated raw-sensor event schedule, follow
+[matlab/README.md, section 6](matlab/README.md#6-generate-a-timestamped-sensor-event-stream-for-the-python-estimator).
+
 ## 8. Recompute metrics in MATLAB or Octave
 The MAT export is the hand-off between Python and MATLAB. In MATLAB, from the
 repository root:

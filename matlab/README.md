@@ -102,6 +102,52 @@ to the live Python/ROS process. Then measure per-scan runtime and deadline
 misses, queue growth, dropped/late messages, timestamp synchronization, and
 sensor-loss behavior on the target computer.
 
+## 6. Generate a timestamped sensor-event stream for the Python estimator
+MATLAB Online's Python environment currently has no NumPy/SciPy, so it cannot
+run this estimator directly. Instead, MATLAB creates the event ordering and
+the local Python consumer runs the estimator on that ordered stream. This is
+an offline replay/scheduling simulation, not a live MATLAB-to-Python connection.
+
+First, on the Mac Terminal from the repository root, export the first 15
+seconds of raw sensors (about 100 MB):
+
+```sh
+PYTHONPATH=src python scripts/export_sensor_stream_for_matlab.py \
+  --data-dir "/Users/apoorvsharma/Downloads/garlio_btp_full/real_data/extracted_data" \
+  --output outputs/matlab_sensor_stream/sensor_stream_source.mat \
+  --max-seconds 15
+```
+
+Upload `outputs/matlab_sensor_stream/sensor_stream_source.mat` and
+`matlab/generate_sensor_event_stream.m` to MATLAB Drive. In MATLAB Online, run
+this in the Command Window:
+
+```matlab
+eventScript = dir(fullfile(pwd, '**', 'generate_sensor_event_stream.m'));
+sourceFile = dir(fullfile(pwd, '**', 'sensor_stream_source.mat'));
+addpath(eventScript(1).folder);
+eventFile = fullfile(sourceFile(1).folder, 'matlab_generated_event_stream.mat');
+generate_sensor_event_stream( ...
+    fullfile(sourceFile(1).folder, sourceFile(1).name), eventFile);
+```
+
+Download `matlab_generated_event_stream.mat` from MATLAB Drive into
+`outputs/matlab_sensor_stream/`. Then run the Python consumer from the Mac
+Terminal:
+
+```sh
+PYTHONPATH=src:scripts python scripts/replay_matlab_sensor_event_stream.py \
+  outputs/matlab_sensor_stream/sensor_stream_source.mat \
+  outputs/matlab_sensor_stream/matlab_generated_event_stream.mat \
+  --output-dir outputs/matlab_sensor_stream/run
+```
+
+It processes each LiDAR scan, simulates deadlines from recorded timestamps,
+and compares the resulting poses with the saved batch trajectory when that MAT
+file exists. Event codes are IMU=1, radar=2, LiDAR=3; simultaneous timestamps
+are ordered IMU, radar, then LiDAR. The source MAT and generated event manifest
+are separate so MATLAB only needs to save the compact event schedule.
+
 ## Files
 
 - `align_umeyama.m`: rigid position alignment used by ATE.
@@ -110,3 +156,5 @@ sensor-loss behavior on the target computer.
 - `run_evaluation_comparison.m`: load the MAT export and compare with Python.
 - `run_realtime_replay.m`: timestamp-paced saved-pose visualization and
   assumption-based serial deadline simulation; not a MATLAB estimator.
+- `generate_sensor_event_stream.m`: MATLAB event-order generator for raw
+  IMU/radar/LiDAR measurements; consumed by the Python estimator replay.
